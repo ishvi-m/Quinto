@@ -8,7 +8,7 @@ from itertools import compress
 import numpy as np
 import wandb
 from wandb.integration.sb3 import WandbCallback
-
+import torch
 import argparse
 
 
@@ -94,6 +94,10 @@ if args.default:
     logwandb = True
 
 def main(): 
+    # Set device to GPU if available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
     # no seed is setted, but it can be easily done uncommenting the following lines
     seed = None
     # np.random.seed(seed)
@@ -133,17 +137,44 @@ def main():
     if action_masking:
         # masking action space to those actually available
         env = ActionMasker(env, mask_function)
-        # maskable PPO object
+        # maskable PPO object with GPU support
         model = MaskablePPO(
             MaskableActorCriticPolicy, 
             env=env, 
             verbose=verbose,
             seed=seed,
-            tensorboard_log=f"logs/tensorboard.id"
+            tensorboard_log=f"logs/tensorboard.id",
+            device=device,
+            # Optimize for GPU
+            n_steps=2048,  # Increased batch size for GPU
+            batch_size=64,  # Increased batch size for GPU
+            n_epochs=10,    # Increased epochs for GPU
+            learning_rate=3e-4,
+            ent_coef=0.01,
+            vf_coef=0.5,
+            max_grad_norm=0.5,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            clip_range_vf=None,
+            normalize_advantage=True,
+            target_kl=None,
+            tensorboard_log=None,
+            create_eval_env=False,
+            policy_kwargs=None,
+            verbose=0,
+            seed=None,
+            device=device,
+            _init_setup_model=True
         )
     else: 
         model_function = reverseAlgoDict[algorithm.upper()]
-        model = model_function("MlpPolicy", env=env, verbose=verbose, seed=seed)
+        model = model_function(
+            "MlpPolicy", 
+            env=env, 
+            verbose=verbose, 
+            seed=seed,
+            device=device
+        )
 
     model_name = algorithm.upper() + version + "_" + trainsteps_dict[train_timesteps]
 

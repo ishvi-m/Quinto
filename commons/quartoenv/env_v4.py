@@ -7,6 +7,7 @@ from .game import QuartoPiece, QUARTO_DICT
 import random
 from itertools import product
 from ..policies import mask_function
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,10 @@ class CustomOpponentEnv_V4(QuartoBase):
         self.move_encoder = None  # Will be set by the training script
         self.inverse_symmetries = None  # Will be set by the training script
         self._opponent = None  # Will be set by the training script
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        
+        # Pre-compute center positions for faster checking
+        self.center_positions = set([(1, 1), (1, 2), (2, 1), (2, 2)])
 
     def update_opponent(self, new_opponent):
         """Update the opponent model"""
@@ -40,13 +45,13 @@ class CustomOpponentEnv_V4(QuartoBase):
 
         # Terminal state rewards
         if info["win"]:
-            reward += 5  # Win reward
+            reward += 10  # Win reward
             reward += 5 / info["turn"]  # Faster win bonus
         elif info["draw"]:
             reward = 1  # Draw reward
         elif info.get("loss", None):
-            reward = -5  # Loss penalty
-            reward -= 0.5 *info["turn"]  # Prolonged loss penalty
+            reward = -10  # Loss penalty
+            reward -= 0.5 * info["turn"]  # Prolonged loss penalty
 
         # Intermediate rewards
         if info.get("threat_created", False):
@@ -73,9 +78,8 @@ class CustomOpponentEnv_V4(QuartoBase):
         # Agent's move
         _, _, _, info = super().step((position, next))
 
-        # Check for center position
-        x, y = position
-        if (x, y) in [(1, 1), (1, 2), (2, 1), (2, 2)]:
+        # Check for center position (using pre-computed set for O(1) lookup)
+        if position in self.center_positions:
             info["center_position"] = True
 
         # Check for threat blocking
@@ -100,7 +104,7 @@ class CustomOpponentEnv_V4(QuartoBase):
                     opponent_pos = inverse_symmetry(*opponent_pos)
             
             # Step environment with opponent's move
-            super().step((opponent_pos, opponent_piece))
+            _, reward, _, info = super().step((opponent_pos, opponent_piece))
             
             if self.done:
                 info["loss"] = True
