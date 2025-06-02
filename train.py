@@ -158,11 +158,8 @@ def main():
             clip_range_vf=None,
             normalize_advantage=True,
             target_kl=None,
-            tensorboard_log=None,
             create_eval_env=False,
             policy_kwargs=None,
-            verbose=0,
-            seed=None,
             device=device,
             _init_setup_model=True
         )
