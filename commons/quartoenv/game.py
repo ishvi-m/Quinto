@@ -128,6 +128,51 @@ class QuartoGame:
         # you played a valid move. The game might also be finished.
         return True  
 
+    def threatCreated(self, position: tuple) -> bool:
+        """Check if placing a piece in a given position creates a threat, i.e., if the board now has 3 of a shared attribute in a row/column/diagonal.
+        
+        Args:
+            position (tuple): The position where the piece was placed.
+        
+        Returns:
+            bool: True if placing the piece creates a threat, False otherwise.
+        """
+        x, y = position
+
+        # Helper to check if a line is a threat
+        def is_threat(line):
+            # line: list of 4 board values (indices or -1)
+            if list(line).count(-1) != 1:
+                return False
+            # Get indices of filled spots
+            filled_indices = [idx for idx, val in enumerate(line) if val != -1]
+            if len(filled_indices) != 3:
+                return False
+            # Get the three pieces
+            pieces = [QUARTO_DICT[line[idx]] for idx in filled_indices]
+            # Check if they share any attribute
+            for attr in ["tall", "hollow", "dark", "round"]:
+                if getattr(pieces[0], attr) == getattr(pieces[1], attr) == getattr(pieces[2], attr):
+                    return True
+            return False
+
+        # Check row
+        if is_threat(self.board[x, :]):
+            return True
+        # Check column
+        if is_threat(self.board[:, y]):
+            return True
+        # Check main diagonal if position is on it
+        if x == y:
+            if is_threat([self.board[i, i] for i in range(4)]):
+                return True
+        # Check anti-diagonal if position is on it
+        if x + y == 3:
+            if is_threat([self.board[i, 3 - i] for i in range(4)]):
+                return True
+
+        return False
+    
     @property
     def game_over(self):
         """Check if someone won.
