@@ -68,6 +68,10 @@ class QuartoBase(gym.Env):
                 reward = -200
                 self.broken = True  # boolean indicator indicating when invalid action is performed
                 info['invalid'] = True
+
+            elif self.game.threatCreated(position):
+                reward += 1
+                info['threat'] = True
             
             # check if played move makes the agent win
             elif self.game.game_over:
