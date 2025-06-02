@@ -82,6 +82,10 @@ class QuartoBase(gym.Env):
             else:
                 # a valid move was played
                 reward = 0
+            
+            if self.game.threatCreated(position):
+                reward += 1
+                info['threat'] = True
         
         # Process the next piece
         self.piece = next
