@@ -173,6 +173,90 @@ class QuartoGame:
 
         return False
     
+    def threatBlocked(self, position: tuple) -> bool:
+        """Check if placing a piece in a given position blocks a threat, i.e., 
+        if the board previously had 3 of a shared attribute in a row/column/diagonal 
+        and the new piece blocks that threat.
+        
+        Args:
+            position (tuple): The position where the piece was placed.
+        
+        Returns:
+            bool: True if placing the piece blocks a threat, False otherwise.
+        """
+        x, y = position
+
+        def was_threat(line):
+            # Threat exists if exactly one empty and three share an attribute
+            if list(line).count(-1) != 1:
+                return False
+            filled_indices = [idx for idx, val in enumerate(line) if val != -1]
+            pieces = [QUARTO_DICT[line[idx]] for idx in filled_indices]
+            for attr in ["tall", "hollow", "dark", "round"]:
+                if getattr(pieces[0], attr) == getattr(pieces[1], attr) == getattr(pieces[2], attr):
+                    return True
+            return False
+
+        def is_threat_blocked(line):
+            # After move, check if the previous threat is gone
+            filled_indices = [idx for idx, val in enumerate(line) if val != -1]
+            if len(filled_indices) < 4:
+                return False  # Not enough pieces to block a threat
+            pieces = [QUARTO_DICT[line[idx]] for idx in filled_indices]
+            # Check if any attribute is shared by all 4 pieces
+            for attr in ["tall", "hollow", "dark", "round"]:
+                if getattr(pieces[0], attr) == getattr(pieces[1], attr) == getattr(pieces[2], attr) == getattr(pieces[3], attr):
+                    return False  # Threat still exists
+            return True  # No attribute shared by all 4 pieces
+
+        # Save current board value, set to -1 to simulate before-move state
+        prev_val = self.board[x, y]
+        self.board[x, y] = -1
+
+        # Check row
+        row = list(self.board[x, :])
+        if was_threat(row):
+            self.board[x, y] = prev_val
+            if is_threat_blocked(list(self.board[x, :])):
+                return True
+        else:
+            self.board[x, y] = prev_val
+
+        # Check column
+        self.board[x, y] = -1
+        col = list(self.board[:, y])
+        if was_threat(col):
+            self.board[x, y] = prev_val
+            if is_threat_blocked(list(self.board[:, y])):
+                return True
+        else:
+            self.board[x, y] = prev_val
+
+        # Check main diagonal
+        if x == y:
+            self.board[x, y] = -1
+            diag = [self.board[i, i] for i in range(4)]
+            if was_threat(diag):
+                self.board[x, y] = prev_val
+                if is_threat_blocked([self.board[i, i] for i in range(4)]):
+                    return True
+            else:
+                self.board[x, y] = prev_val
+
+        # Check anti-diagonal
+        if x + y == 3:
+            self.board[x, y] = -1
+            adiag = [self.board[i, 3 - i] for i in range(4)]
+            if was_threat(adiag):
+                self.board[x, y] = prev_val
+                if is_threat_blocked([self.board[i, 3 - i] for i in range(4)]):
+                    return True
+            else:
+                self.board[x, y] = prev_val
+
+        self.board[x, y] = prev_val  # Restore
+        return False
+    
     @property
     def game_over(self):
         """Check if someone won.
@@ -262,3 +346,28 @@ class QuartoGame:
 
         # return the array of available actions.
         return np.fromiter(product(available_pos, available_pieces), dtype = tuple)
+
+    def badPieceGiven(self, piece: QuartoPiece) -> bool:
+        """Check if giving a piece to the opponent would allow them to win.
+        
+        Args:
+            piece (QuartoPiece): The piece being given to the opponent.
+            
+        Returns:
+            bool: True if the piece would allow the opponent to win, False otherwise.
+        """
+        # Check each empty position on the board
+        for x, y in self.free_spots:
+            # Temporarily place the piece
+            self.board[x, y] = piece.index
+            
+            # Check if this creates a winning line
+            if self.game_over:
+                # Remove the piece
+                self.board[x, y] = -1
+                return True
+                
+            # Remove the piece
+            self.board[x, y] = -1
+            
+        return False

@@ -40,6 +40,7 @@ class QuartoBase(gym.Env):
         # sparse rewards - no reward but in terminal states
         # TODO: Might be interesting to reward negatively the agent at each turn to encourage
         #       winning early. Idea
+        # CS224R extension on Quinto: dense rewards!
         
         reward = 0
         # increment number of turns
@@ -47,7 +48,8 @@ class QuartoBase(gym.Env):
         info = {'turn': self.turns,
                 'invalid': False,
                 'win': False,
-                'draw': False}
+                'draw': False,
+                'threat_created': False}
         
         if self.done:
             logger.warn("Actually already done")
@@ -70,22 +72,19 @@ class QuartoBase(gym.Env):
                 info['invalid'] = True
 
             elif self.game.threatCreated(position):
-                reward += 1
-                info['threat'] = True
+                info['threat_created'] = True
             
             # check if played move makes the agent win
             elif self.game.game_over:
                 # We just won!
-                reward = +1
                 info['win'] = True
             
             # check draw
             elif self.game.draw:
-                reward = 0.2
                 info['draw'] = True
             else:
                 # a valid move was played
-                reward = 0
+                pass
         
         # Process the next piece
         self.piece = next

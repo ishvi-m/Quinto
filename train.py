@@ -1,5 +1,5 @@
 from commons.policies import reverseAlgoDict, AlgoDict, mask_function, ActionMasker
-from commons.quartoenv import RandomOpponentEnv, RandomOpponentEnv_V1, RandomOpponentEnv_V2, CustomOpponentEnv_V3
+from commons.quartoenv import RandomOpponentEnv, RandomOpponentEnv_V1, RandomOpponentEnv_V2, CustomOpponentEnv_V3, CustomOpponentEnv_V4
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 from sb3_contrib.ppo_mask import MaskablePPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EveryNTimesteps
@@ -47,12 +47,12 @@ def parse_args()->object:
     parser.add_argument("--show-progressbar", default=True, type=boolean_string, help="Whether or not to display a progressbar during training")
     parser.add_argument("--save-model", default=False, type=boolean_string, help="Whether or not save the model currently trained")
     parser.add_argument("--resume-training", default=False, type=boolean_string, help="Whether or not load and keep train an already trained model")
-    parser.add_argument("--model-path", default=None, type=str, help="Path to which the model to incrementally train is stored")
-    parser.add_argument("--use-symmetries", default=False, type=boolean_string, help="Whether or not let the agent exploit the game symmetries")
-    parser.add_argument("--self-play", default=False, type=boolean_string, help="Whether or not to let the agent play against checkpointed copies of itself")
-    parser.add_argument("--logwandb", default=True, type=boolean_string, help="Whether or not to log the training process on wandb")
-
-    parser.add_argument("--default", default=True, type=boolean_string, help="Default mode, ignore all configurations")
+    parser.add_argument("--model-path", default=None, type=str, help="Path to the model to resume training from")
+    parser.add_argument("--use-symmetries", default=False, type=boolean_string, help="Whether or not to use board symmetries during training")
+    parser.add_argument("--self-play", default=False, type=boolean_string, help="Whether or not to use self-play during training")
+    parser.add_argument("--logwandb", default=False, type=boolean_string, help="Whether or not to log training metrics to Weights & Biases")
+    parser.add_argument("--use-comprehensive-rewards", default=False, type=boolean_string, help="Whether or not to use comprehensive reward functions (V4 environment)")
+    parser.add_argument("--default", default=False, type=boolean_string, help="Whether or not to use default training parameters")
     return parser.parse_args()
 
 args = parse_args()
@@ -118,6 +118,9 @@ def main():
             if use_symmetries:
                 env = CustomOpponentEnv_V3()
                 version = "v3"
+                if args.use_comprehensive_rewards:
+                    env = CustomOpponentEnv_V4()
+                    version = "v4"
                 # creating an opponent from the one given in model path - opponent does always play legit moves
                 opponent = MaskablePPO.load(model_path, env=env, custom_objects={'learning_rate': 0.0, "clip_range": 0.0, "lr_schedule":0.0})
                 opponent.set_env(env=env)
