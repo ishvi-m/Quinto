@@ -34,6 +34,11 @@ class CustomOpponentEnv_V4(QuartoBase):
         
         # Pre-compute center positions for faster checking
         self.center_positions = set([(1, 1), (1, 2), (2, 1), (2, 2)])
+        self.total_threats_created = 0
+        self.total_threats_blocked = 0
+        self.total_center_positions = 0
+        self.total_bad_pieces = 0
+        self.total_losses = 0
 
     def update_opponent(self, new_opponent):
         """Update the opponent model"""
@@ -81,14 +86,17 @@ class CustomOpponentEnv_V4(QuartoBase):
         # Check for center position (using pre-computed set for O(1) lookup)
         if position in self.center_positions:
             info["center_position"] = True
+            self.total_center_positions += 1
 
         # Check for threat blocking
         if self.game.threatBlocked(position):
             info["threat_blocked"] = True
+            self.total_threats_blocked += 1
 
         # Check for bad piece (piece that allows opponent to win)
         if self.game.badPieceGiven(next):
             info["bad_piece"] = True
+            self.total_bad_pieces += 1
 
         if not self.done:
             # Opponent's reply
@@ -108,8 +116,35 @@ class CustomOpponentEnv_V4(QuartoBase):
             
             if self.done:
                 info["loss"] = True
+                self.total_losses += 1
+                logger.info(f"Game lost (Total losses: {self.total_losses})")
 
         # Calculate reward using our reward function
         reward = self.reward_function(info)
+
+        # Log aggregated statistics at the end of each game
+        if self.done:
+            logger.info("Final game statistics:")
+            logger.info(f"This episode:")
+            logger.info(f"  Threats created: {self.total_threats_created}")
+            logger.info(f"  Threats blocked: {self.total_threats_blocked}")
+            logger.info(f"  Center positions used: {self.total_center_positions}")
+            logger.info(f"  Bad pieces given: {self.total_bad_pieces}")
+            logger.info(f"  Game {'lost' if info.get('loss', False) else 'won'}")
+            
+            # Calculate lifetime totals (including current episode)
+            curr_lifetime_threats = self.lifetime_threats_created + self.total_threats_created
+            curr_lifetime_blocks = self.lifetime_threats_blocked + self.total_threats_blocked
+            curr_lifetime_centers = self.lifetime_center_positions + self.total_center_positions
+            curr_lifetime_bad = self.lifetime_bad_pieces + self.total_bad_pieces
+            curr_lifetime_losses = self.lifetime_losses + (1 if info.get('loss', False) else 0)
+            curr_episodes = self.total_episodes + 1
+            
+            logger.info(f"\nLifetime statistics (including this episode):")
+            logger.info(f"  Average threats created: {curr_lifetime_threats/curr_episodes:.2f}")
+            logger.info(f"  Average threats blocked: {curr_lifetime_blocks/curr_episodes:.2f}")
+            logger.info(f"  Average center positions: {curr_lifetime_centers/curr_episodes:.2f}")
+            logger.info(f"  Average bad pieces: {curr_lifetime_bad/curr_episodes:.2f}")
+            logger.info(f"  Win rate: {(curr_episodes - curr_lifetime_losses)/curr_episodes:.2%}")
         
         return self._observation, reward, self.done, info 

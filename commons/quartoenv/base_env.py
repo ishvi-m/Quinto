@@ -16,6 +16,21 @@ class QuartoBase(gym.Env):
         self.broken = False
         self.EMPTY = 0
         self.metadata = {'render.modes':['human', 'terminal']}
+        
+        # Episode statistics counters
+        self.total_threats_created = 0
+        self.total_threats_blocked = 0
+        self.total_center_positions = 0
+        self.total_bad_pieces = 0
+        self.total_losses = 0
+
+        # Lifetime statistics (across all episodes)
+        self.lifetime_threats_created = 0
+        self.lifetime_threats_blocked = 0
+        self.lifetime_center_positions = 0
+        self.lifetime_bad_pieces = 0
+        self.lifetime_losses = 0
+        self.total_episodes = 0
 
     @property
     def _observation(self):
@@ -34,6 +49,29 @@ class QuartoBase(gym.Env):
         self.turns = 0
         self.piece = None
         self.broken = False
+        
+        # Update lifetime stats with episode stats before resetting
+        self.lifetime_threats_created += self.total_threats_created
+        self.lifetime_threats_blocked += self.total_threats_blocked
+        self.lifetime_center_positions += self.total_center_positions
+        self.lifetime_bad_pieces += self.total_bad_pieces
+        self.lifetime_losses += self.total_losses
+        self.total_episodes += 1
+
+        # Log lifetime statistics at episode end
+        logger.info(f"\nLifetime Statistics (After {self.total_episodes} episodes):")
+        logger.info(f"Average threats created per episode: {self.lifetime_threats_created/self.total_episodes:.2f}")
+        logger.info(f"Average threats blocked per episode: {self.lifetime_threats_blocked/self.total_episodes:.2f}")
+        logger.info(f"Average center positions per episode: {self.lifetime_center_positions/self.total_episodes:.2f}")
+        logger.info(f"Average bad pieces per episode: {self.lifetime_bad_pieces/self.total_episodes:.2f}")
+        logger.info(f"Win rate: {(self.total_episodes - self.lifetime_losses)/self.total_episodes:.2%}\n")
+        
+        # Reset episode statistics counters
+        self.total_threats_created = 0
+        self.total_threats_blocked = 0
+        self.total_center_positions = 0
+        self.total_bad_pieces = 0
+        self.total_losses = 0
 
     def step(self, action:Tuple[tuple, QuartoPiece])->Tuple:
         """This function steps the environment considering the given action"""
@@ -73,6 +111,8 @@ class QuartoBase(gym.Env):
 
             elif self.game.threatCreated(position):
                 info['threat_created'] = True
+                self.total_threats_created += 1
+                logger.info(f"Threat created at position {position} (Total: {self.total_threats_created})")
             
             # check if played move makes the agent win
             elif self.game.game_over:
@@ -85,6 +125,37 @@ class QuartoBase(gym.Env):
             else:
                 # a valid move was played
                 pass
+
+            # Track additional statistics in info
+            if position in [(1,1), (1,2), (2,1), (2,2)]:
+                info['center_position'] = True
+                self.total_center_positions += 1
+                logger.info(f"Center position used at {position} (Total: {self.total_center_positions})")
+
+            if self.game.threatBlocked(position):
+                info['threat_blocked'] = True
+                self.total_threats_blocked += 1
+                logger.info(f"Threat blocked at position {position} (Total: {self.total_threats_blocked})")
+
+            if self.game.badPieceGiven(next):
+                info['bad_piece'] = True
+                self.total_bad_pieces += 1
+                logger.info(f"Bad piece given: {next} (Total: {self.total_bad_pieces})")
+
+            # Add aggregated stats to info
+            info.update({
+                'total_threats_created': self.total_threats_created,
+                'total_threats_blocked': self.total_threats_blocked,
+                'total_center_positions': self.total_center_positions,
+                'total_bad_pieces': self.total_bad_pieces,
+                'total_losses': self.total_losses,
+                'lifetime_threats_created': self.lifetime_threats_created + self.total_threats_created,
+                'lifetime_threats_blocked': self.lifetime_threats_blocked + self.total_threats_blocked,
+                'lifetime_center_positions': self.lifetime_center_positions + self.total_center_positions,
+                'lifetime_bad_pieces': self.lifetime_bad_pieces + self.total_bad_pieces,
+                'lifetime_losses': self.lifetime_losses + self.total_losses,
+                'total_episodes': self.total_episodes
+            })
         
         # Process the next piece
         self.piece = next
