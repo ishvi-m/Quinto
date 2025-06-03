@@ -7,4 +7,5 @@ stable_baselines3
 wandb
 tqdm
 torch
+shimmy
 tensorboard

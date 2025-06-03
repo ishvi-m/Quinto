@@ -7,7 +7,6 @@ from .game import QuartoPiece, QUARTO_DICT
 import random
 from itertools import product
 from ..policies import mask_function
-from gymnasium.spaces import MultiDiscrete
 import torch
 from .encoder import MoveEncoder
 from sb3_contrib import MaskablePPO
@@ -36,50 +35,57 @@ class CustomOpponentEnv_V4(QuartoBase):
         # action space
         self.action_space = MultiDiscrete([16, 16])  # [position, piece]
         self.move_encoder = MoveEncoder()
-        self.inverse_symmetries = None  # Will be set by the training script
+        # self.inverse_symmetries = None  # Will be set by the training script
         self._opponent = None  # Will be set by the training script
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
-        # Pre-compute center positions for faster checking
-        self.center_positions = set([(1, 1), (1, 2), (2, 1), (2, 2)])
+        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    @property
+    def opponent(self):
+        """Getter method to retrieve opponent"""
+        return self._opponent
+    
+    def update_opponent(self, new_opponent:OnPolicyAlgorithm):
+        """Setter method for opponent. Implemented to perform self-play with increasingly better agents."""
+        if isinstance(new_opponent, OnPolicyAlgorithm):
+            del self._opponent
+            self._opponent = new_opponent
+        else:
+            raise ValueError(f"New opponent: {new_opponent} is not an OnPolicyAlgorithm instance!")
 
     @property
     def _observation(self):
         """Observation is returned in the observed space composed of integers"""
-        # Get the parent observation (board, current_piece)
-        board, current_piece = super()._observation
-        
-        # Convert board to flattened array, replacing -1 with 16
-        board_pieces = np.array([16 if x == -1 else x for x in board.flatten()], dtype=np.int32)
-        
-        # Get the current piece index, or 16 if None
+        parent_obs = super()._observation
+        board, current_piece = parent_obs
+        board_pieces = np.fromiter(map(lambda el: 16 if el == -1 else el, board.flatten()), dtype=int)
         hand_piece = current_piece.index if current_piece else 16
-        
-        # Combine board and hand piece into a single array
-        return np.concatenate([board_pieces, [hand_piece]])
 
-    def update_opponent(self, new_opponent):
-        """Update the opponent model"""
-        self._opponent = new_opponent
+        return np.append(arr=board_pieces, values=hand_piece)
+    
+    def reward_function(self, info: dict) -> float:
+        """Computes the reward at timestep `t` given the corresponding info dictionary"""
+        reward = 0.0
 
-    def legal_actions(self): 
-        """This function returns all the legal actions given the present state encoded as int-int tuples.
-        
-        Yields: 
-            (int, int): Tuple encoding position and piece in their integer version.
-        """
-        # freecells are cells with no piece inside
-        freecells = self.game.free_spots
-        # available pieces are those that have not been put on the board
-        available_pieces = list(
-            map(lambda el: QUARTO_DICT[el], self.available_pieces())) \
-                if len(self.available_pieces()) > 0 \
-                else [None]
-        
-        # a legal action is of the kind ((x,y), QuartoPiece)
-        for legal_action in product(freecells, available_pieces): 
-            yield self.move_encoder.encode(legal_action)
+        # Terminal state rewards
+        if info["win"]:
+            reward += 10  # Win reward
+            reward += 5 / info["turn"]  # Faster win bonus
+        elif info["draw"]:
+            reward = 2  # Draw reward
+        elif info.get("loss", None):
+            reward = -10  # Loss penalty
+            reward -= 0.5 * info["turn"]  # Prolonged loss penalty
 
+        # Intermediate rewards
+        if info.get("threat_created", False):
+            reward += 1.0  # Threat creation reward
+        if info.get("threat_blocked", False):
+            reward += 0.5  # Threat blocking reward
+        if info.get("bad_piece", False):
+            reward -= 0.5  # Bad piece penalty
+
+        return reward
+    
     def available_pieces(self)->list:
         """This function returns the pieces currently available. Those are defined as all the pieces
         available but the one each player has in hand and the ones on the board.
@@ -96,53 +102,51 @@ class CustomOpponentEnv_V4(QuartoBase):
         
         return available_pieces
 
-    def reset(self, *, seed=None, options=None):
-        """Resets the environment and returns the initial observation"""
+    def legal_actions(self): 
+        """This function returns all the legal actions given the present state encoded as int-int tuples.
+        
+        Yields: 
+            (int, int): Tuple encoding position and piece in their integer version.
+        """
+        # freecells are cells with no piece inside
+        freecells = np.argwhere(self.symmetric_board == -1)
+        # available pieces are those that have not been put on the board
+        available_pieces = list(
+            map(lambda el: QUARTO_DICT[el], self.available_pieces())) \
+                if len(self.available_pieces()) > 0 \
+                else [None]
+        
+        # a legal action is of the kind ((x,y), QuartoPiece)
+        for legal_action in product(freecells, available_pieces): 
+            yield self.move_encoder.encode(legal_action)
+
+    def get_observation(self): 
+        return self._observation
+    
+    def reset(self, *, seed=None, options=None): 
+        """Resets env and returns initial observation and info dict
+        
+        Args:
+            seed: Optional seed for random number generator
+            options: Optional dictionary with additional reset options
+            
+        Returns:
+            observation: Initial observation
+            info: Empty info dict
+        """
         super().reset_state()
         return self._observation, {}  # Return observation and empty info dict for Gymnasium compatibility
 
-    def reward_function(self, info: dict) -> float:
-        """Computes the reward at timestep `t` given the corresponding info dictionary"""
-        reward = 0.0
-
-        # Terminal state rewards
-        if info["win"]:
-            reward += 10  # Win reward
-            reward += 5 / info["turn"]  # Faster win bonus
-        elif info["draw"]:
-            reward = 1  # Draw reward
-        elif info.get("loss", None):
-            reward = -10  # Loss penalty
-            reward -= 0.5 * info["turn"]  # Prolonged loss penalty
-
-        # Intermediate rewards
-        if info.get("threat_created", False):
-            reward += 1.0  # Threat creation reward
-        if info.get("threat_blocked", False):
-            reward += 0.5  # Threat blocking reward
-        if info.get("bad_piece", False):
-            reward -= 0.5  # Bad piece penalty
-        if info.get("center_position", False):
-            reward += 0.1  # Center preference reward
-
-        return reward
-
     def step(self, action: Tuple[int, int]):
         """Steps the environment given an action"""
-        # Decoding and unpacking action
+        # decoding and unpacking action
         position, next = self.move_encoder.decode(action=action)
-        
-        # Apply symmetries if needed
-        if self.inverse_symmetries:
-            for inverse_symmetry in self.inverse_symmetries:
-                position = inverse_symmetry(*position)
 
-        # Agent's move
         _, _, _, truncated, info = super().step((position, next))
 
-        # Check for center position (using pre-computed set for O(1) lookup)
-        if position in self.center_positions:
-            info["center_position"] = True
+        # Check for threat blocking
+        if self.game.threatCreated(position):
+            info["threat_created"] = True
 
         # Check for threat blocking
         if self.game.threatBlocked(position):
@@ -153,30 +157,20 @@ class CustomOpponentEnv_V4(QuartoBase):
             info["bad_piece"] = True
 
         if not self.done:
-            # Opponent's reply
-            if isinstance(self._opponent, MaskablePPO):
-                opponent_action, _ = self._opponent.predict(
-                    observation=self._observation,
-                    action_masks=mask_function(self)
+            # opponent's reply
+            opponent_action, _ = self._opponent.predict(
+                observation=self._observation, 
+                action_masks = mask_function(self)
                 )
-            else:
-                opponent_action, _ = self._opponent.predict(
-                    observation=self._observation
-                )
+            # mapping opponent moves to the usual (tuple, int) representation
             opponent_pos, opponent_piece = self.move_encoder.decode(action=opponent_action)
+            super().step((opponent_pos, opponent_piece))
             
-            # Apply symmetries to opponent's move if needed
-            if self.inverse_symmetries:
-                for inverse_symmetry in self.inverse_symmetries:
-                    opponent_pos = inverse_symmetry(*opponent_pos)
-            
-            # Step environment with opponent's move
-            _, _, _, truncated, info = super().step((opponent_pos, opponent_piece))
-            
-            if self.done:
+            if self.done: 
                 info["loss"] = True
-
-        # Calculate reward using our reward function
-        reward = self.reward_function(info)
         
-        return self._observation, reward, self.done, truncated, info 
+        reward = self.reward_function(info=info)
+        return self._observation, reward, self.done, truncated, info
+        
+
+        
