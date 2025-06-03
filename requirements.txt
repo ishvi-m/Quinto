@@ -6,3 +6,5 @@ sb3_contrib
 stable_baselines3
 wandb
 tqdm
+torch
+tensorboard
