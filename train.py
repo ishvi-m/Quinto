@@ -145,7 +145,24 @@ def main():
             env=env, 
             verbose=verbose,
             seed=seed,
-            tensorboard_log=f"logs/tensorboard.id"
+            tensorboard_log=f"logs/tensorboard.id",
+            device=device,
+            # Optimize for GPU
+            n_steps=2048,  # Increased batch size for GPU
+            batch_size=64,  # Increased batch size for GPU
+            n_epochs=10,    # Increased epochs for GPU
+            learning_rate=3e-4,
+            ent_coef=0.01,
+            vf_coef=0.5,
+            max_grad_norm=0.5,
+            gae_lambda=0.95,
+            clip_range=0.2,
+            clip_range_vf=None,
+            normalize_advantage=True,
+            target_kl=None,
+            create_eval_env=False,
+            policy_kwargs=None,
+            _init_setup_model=True
         )
     else: 
         model_function = reverseAlgoDict[algorithm.upper()]
