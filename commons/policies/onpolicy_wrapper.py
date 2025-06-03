@@ -7,9 +7,12 @@ import numpy as np
 def mask_function(env: gym.Env) -> np.ndarray:
     """This function returns the encoding of the valid moves given the actual.
     """
+    # Get the underlying environment if wrapped
+    unwrapped_env = env.env if hasattr(env, 'env') else env
+    
     # unpack legal_actions() in legal_positions and in legal_pieces
-    legal_positions = set([action[0] for action in env.legal_actions()])
-    legal_pieces = set([action[1] for action in env.legal_actions()])
+    legal_positions = set([action[0] for action in unwrapped_env.legal_actions()])
+    legal_pieces = set([action[1] for action in unwrapped_env.legal_actions()])
 
     # convert into masking
 
@@ -31,16 +34,17 @@ class OnPolicy:
         """Test trained policy in `model` for `n_episodes`"""
         wincounter, losscounter, drawcounter, invalidcounter = 0, 0, 0, 0
         for episode in track(range(n_episodes)):
-            obs = self.env.reset()
+            obs, _ = self.env.reset()  # Unpack observation and info
             done = False
-            while not done:
+            truncated = False
+            while not (done or truncated):
                 # either performing a masked action or not
                 if isinstance(self.model, MaskablePPO):
                     action, _ = self.model.predict(obs, action_masks = mask_function(self.env))
                 else:
                     action, _ = self.model.predict(obs)
                 # stepping the environment with the considered action 
-                obs, _, done, info = self.env.step(action=action)
+                obs, _, done, truncated, info = self.env.step(action=action)
 
             if info["win"]: 
                 wincounter += 1
