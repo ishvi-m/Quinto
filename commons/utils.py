@@ -32,17 +32,19 @@ class WinPercentageCallback(BaseCallback):
         """
         wincounter, losscounter, drawcounter, invalidcounter, matchduration = 0, 0, 0, 0, 0
         for episode in range(self.n_episodes):
-            obs = self._env.reset()
+            obs, _ = self._env.reset()  # Unpack observation and info
             done = False
-            while not done:
+            truncated = False
+            while not (done or truncated):
                 # either performing a masked action or not
                 if isinstance(self.model, MaskablePPO):
                     action, _ = self.model.predict(obs, action_masks = mask_function(self._env))
                 else:
                     action, _ = self.model.predict(obs)
                 # stepping the environment with the considered action 
-                obs, _, done, info = self._env.step(action=action)
+                obs, _, done, truncated, info = self._env.step(action=action)
             
+            # Get the observation from the environment
             parent_obs = self._env.env._observation
             
             # unpacking parent observation
@@ -73,6 +75,7 @@ class WinPercentageCallback(BaseCallback):
                     100 * invalidcounter / self.n_episodes
                 )
             )
+
         wandb.log({
             "Win(%)": 100 * wincounter / self.n_episodes,
             "Loss(%)": 100 * losscounter / self.n_episodes,
