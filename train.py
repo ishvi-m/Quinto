@@ -8,7 +8,7 @@ from itertools import compress
 import numpy as np
 import wandb
 from wandb.integration.sb3 import WandbCallback
-import torch
+
 import argparse
 
 
@@ -47,12 +47,12 @@ def parse_args()->object:
     parser.add_argument("--show-progressbar", default=True, type=boolean_string, help="Whether or not to display a progressbar during training")
     parser.add_argument("--save-model", default=False, type=boolean_string, help="Whether or not save the model currently trained")
     parser.add_argument("--resume-training", default=False, type=boolean_string, help="Whether or not load and keep train an already trained model")
-    parser.add_argument("--model-path", default=None, type=str, help="Path to the model to resume training from")
-    parser.add_argument("--use-symmetries", default=False, type=boolean_string, help="Whether or not to use board symmetries during training")
-    parser.add_argument("--self-play", default=False, type=boolean_string, help="Whether or not to use self-play during training")
-    parser.add_argument("--logwandb", default=False, type=boolean_string, help="Whether or not to log training metrics to Weights & Biases")
-    parser.add_argument("--use-comprehensive-rewards", default=False, type=boolean_string, help="Whether or not to use comprehensive reward functions (V4 environment)")
-    parser.add_argument("--default", default=False, type=boolean_string, help="Whether or not to use default training parameters")
+    parser.add_argument("--model-path", default=None, type=str, help="Path to which the model to incrementally train is stored")
+    parser.add_argument("--use-symmetries", default=False, type=boolean_string, help="Whether or not let the agent exploit the game symmetries")
+    parser.add_argument("--self-play", default=False, type=boolean_string, help="Whether or not to let the agent play against checkpointed copies of itself")
+    parser.add_argument("--logwandb", default=True, type=boolean_string, help="Whether or not to log the training process on wandb")
+    parser.add_argument("--use-dense-rewards", default=True, type=boolean_string, help="Whether or not to use intermediate rewards")
+    parser.add_argument("--default", default=True, type=boolean_string, help="Default mode, ignore all configurations")
     return parser.parse_args()
 
 args = parse_args()
@@ -92,12 +92,9 @@ if args.default:
     self_play=False
     model_path=None
     logwandb = True
+    use_dense_rewards = True
 
 def main(): 
-    # Set device to GPU if available
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
     # no seed is setted, but it can be easily done uncommenting the following lines
     seed = None
     # np.random.seed(seed)
@@ -122,14 +119,19 @@ def main():
             if use_symmetries:
                 env = CustomOpponentEnv_V3()
                 version = "v3"
-                if args.use_comprehensive_rewards:
-                    env = CustomOpponentEnv_V4()
-                    version = "v4"
                 # creating an opponent from the one given in model path - opponent does always play legit moves
                 opponent = MaskablePPO.load(model_path, env=env, custom_objects={'learning_rate': 0.0, "clip_range": 0.0, "lr_schedule":0.0})
                 opponent.set_env(env=env)
                 # using this opponent to perform adversarial learning
                 env.update_opponent(new_opponent=opponent)
+                if use_dense_rewards:
+                    env = CustomOpponentEnv_V4()
+                    version = "v4"
+                    # Set up opponent for V4 environment
+                    if model_path:
+                        opponent = MaskablePPO.load(model_path, env=env, custom_objects={'learning_rate': 0.0, "clip_range": 0.0, "lr_schedule":0.0})
+                        opponent.set_env(env=env)
+                        env.update_opponent(new_opponent=opponent)
     else:
         env = RandomOpponentEnv()
         version = "v0"
@@ -137,44 +139,17 @@ def main():
     if action_masking:
         # masking action space to those actually available
         env = ActionMasker(env, mask_function)
-        # maskable PPO object with GPU support
+        # maskable PPO object
         model = MaskablePPO(
             MaskableActorCriticPolicy, 
             env=env, 
             verbose=verbose,
             seed=seed,
-            tensorboard_log=f"logs/tensorboard.id",
-            device=device,
-            # Optimize for GPU
-            n_steps=2048,  # Increased batch size for GPU
-            batch_size=64,  # Increased batch size for GPU
-            n_epochs=10,    # Increased epochs for GPU
-            learning_rate=3e-4,
-            ent_coef=0.01,
-            vf_coef=0.5,
-            max_grad_norm=0.5,
-            gae_lambda=0.95,
-            clip_range=0.2,
-            clip_range_vf=None,
-            normalize_advantage=True,
-            target_kl=None,
-            tensorboard_log=None,
-            create_eval_env=False,
-            policy_kwargs=None,
-            verbose=0,
-            seed=None,
-            device=device,
-            _init_setup_model=True
+            tensorboard_log=f"logs/tensorboard.id"
         )
     else: 
         model_function = reverseAlgoDict[algorithm.upper()]
-        model = model_function(
-            "MlpPolicy", 
-            env=env, 
-            verbose=verbose, 
-            seed=seed,
-            device=device
-        )
+        model = model_function("MlpPolicy", env=env, verbose=verbose, seed=seed)
 
     model_name = algorithm.upper() + version + "_" + trainsteps_dict[train_timesteps]
 

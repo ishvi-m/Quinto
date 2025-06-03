@@ -1,6 +1,6 @@
 from .base_env import QuartoBase
 from .encoder import MoveEncoder
-from gym.spaces import MultiDiscrete
+from gymnasium.spaces import MultiDiscrete
 import logging
 import numpy as np
 from typing import Tuple
@@ -127,10 +127,19 @@ class CustomOpponentEnv_V3(QuartoBase):
     def get_observation(self): 
         return self._observation
     
-    def reset(self): 
-        """Resets env"""
+    def reset(self, *, seed=None, options=None): 
+        """Resets env and returns initial observation and info dict
+        
+        Args:
+            seed: Optional seed for random number generator
+            options: Optional dictionary with additional reset options
+            
+        Returns:
+            observation: Initial observation
+            info: Empty info dict
+        """
         super().reset_state()
-        return self._observation
+        return self._observation, {}  # Return observation and empty info dict for Gymnasium compatibility
     
     def step(self, action:Tuple[int,int]):
         """Steps the environment given an action"""
@@ -141,7 +150,7 @@ class CustomOpponentEnv_V3(QuartoBase):
             position = inverse_symmetry(*position)
     
         # agent_ply
-        _, _, _, info = super().step((position, next))
+        _, _, _, truncated, info = super().step((position, next))
 
         if not self.done:
             # opponent's reply
@@ -161,4 +170,4 @@ class CustomOpponentEnv_V3(QuartoBase):
                 info["loss"] = True
         
         reward = self.reward_function(info=info)
-        return self._observation, reward, self.done, info
+        return self._observation, reward, self.done, truncated, info
