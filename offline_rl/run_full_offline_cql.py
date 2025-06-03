@@ -1,6 +1,8 @@
 import subprocess
 import sys
 import torch
+import argparse
+from torch.utils.tensorboard import SummaryWriter
 
 # 1. Generate the dataset
 print("Generating dataset with generate_dataset.py...")
@@ -15,9 +17,15 @@ if torch.cuda.is_available():
 else:
     print("CUDA is NOT available. Training will use CPU.")
 
-subprocess.run([sys.executable, "offline_rl/offline_cql.py"], check=True)
+parser = argparse.ArgumentParser()
+parser.add_argument('--logdir', type=str, default='runs/offline_cql_cs224r', help='TensorBoard log directory')
+args = parser.parse_args()
+
+subprocess.run([sys.executable, "offline_rl/offline_cql.py", "--logdir", args.logdir], check=True)
 
 print("\nAll done! To monitor training, run:")
 print("  tensorboard --logdir runs/offline_cql_cs224r\n")
 print("If you want to check GPU usage during training, run:")
-print("  watch -n 1 nvidia-smi\n") 
+print("  watch -n 1 nvidia-smi\n")
+
+writer = SummaryWriter(log_dir=args.logdir) 

@@ -3,10 +3,10 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pickle
-from commons.quartoenv.env_v2 import RandomOpponentEnv_V2  # or your chosen env
+from commons.quartoenv.env_v4 import CustomOpponentEnv_V4
 
-env = RandomOpponentEnv_V2()
-num_episodes = 1000
+env = CustomOpponentEnv_V4()
+num_episodes = 10000
 dataset = []
 
 for episode in range(num_episodes):
