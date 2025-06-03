@@ -74,11 +74,12 @@ model_path=args.model_path
 use_symmetries=args.use_symmetries
 self_play=args.self_play
 logwandb=args.logwandb
+use_dense_rewards=args.use_dense_rewards
 
 if args.default: 
     algorithm = "maskedPPO"
     verbose=2
-    train_timesteps=100_000_000
+    train_timesteps=1_000_000
     evaluate_while_training=True
     store_checkpoints=True
     evaluation_frequency=1000
