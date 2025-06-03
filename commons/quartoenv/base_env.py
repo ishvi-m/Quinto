@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import logging
 import numpy as np
 from typing import Tuple
@@ -53,7 +53,7 @@ class QuartoBase(gym.Env):
         
         if self.done:
             logger.warn("Actually already done")
-            return self._observation, reward, self.done, info
+            return self._observation, reward, self.done, False, info  # Added truncated=False for Gymnasium compatibility
 
         position, next = action
         logger.debug(f"Received: position: {position}, next: {next}")
@@ -89,7 +89,7 @@ class QuartoBase(gym.Env):
         # Process the next piece
         self.piece = next
         
-        return self._observation, reward, self.done, info
+        return self._observation, reward, self.done, False, info  # Added truncated=False for Gymnasium compatibility
 
     def render(self, mode:str="human", **kwargs):
         "Renders board printing to standard output pieces in their encoding"
