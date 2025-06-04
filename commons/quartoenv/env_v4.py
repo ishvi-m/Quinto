@@ -76,15 +76,15 @@ class CustomOpponentEnv_V4(QuartoBase):
             reward = 2  # Draw reward
         elif info.get("loss", None):
             reward = -10  # Loss penalty
-            reward -= 0.5 * info["turn"]  # Prolonged loss penalty
+            reward -= 1.0 * info["turn"]  # Prolonged loss penalty
 
         # Intermediate rewards
         if info.get("threat_created", False):
-            reward += 1.0  # Threat creation reward
+            reward += 6.0  # Threat creation reward
         if info.get("threat_blocked", False):
-            reward += 0.5  # Threat blocking reward
+            reward += 7.0  # Threat blocking reward
         if info.get("bad_piece", False):
-            reward -= 0.5  # Bad piece penalty
+            reward -= 10.0  # Bad piece penalty
 
         return reward
     

@@ -1,0 +1,27 @@
+# Dataset with INTERMEDIATE rewards (env_v4)
+python offline_rl/generate_dataset_with_agent.py \
+      --model_path commons/trainedmodels/MASKEDPPOv0_5e6.zip \
+      --env_version v4 \
+      --num_episodes 10000 \
+      --output_path offline_dataset_v4.pkl \
+      --use_action_masking
+
+# Dataset with BASE (sparse) rewards (env_v0)
+python offline_rl/generate_dataset_with_agent.py \
+      --model_path commons/trainedmodels/MASKEDPPOv0_5e6.zip \
+      --env_version v0 \
+      --num_episodes 10000 \
+      --output_path offline_dataset_v0.pkl \
+      --use_action_masking
+
+      # Train on the env-v4 dataset
+python offline_rl/offline_cql.py \
+       --dataset offline_dataset_v4.pkl \
+       --logdir runs/offline_cql_v4 \
+       --env_version v4     # evaluation env
+
+# Train on the env-v0 dataset
+python offline_rl/offline_cql.py \
+       --dataset offline_dataset_v0.pkl \
+       --logdir runs/offline_cql_v0 \
+       --env_version v4     # evaluate both agents in the richer-reward env

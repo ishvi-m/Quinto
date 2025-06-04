@@ -87,7 +87,14 @@ class CQLAgent:
             action_idx = q_values.argmax().item()
         return action_idx
 
-with open("offline_quinto_dataset.pkl", "rb") as f:
+parser = argparse.ArgumentParser()
+parser.add_argument('--dataset', type=str, default='offline_quinto_dataset.pkl', help='Path to offline dataset (.pkl)')
+parser.add_argument('--logdir', type=str, default='runs/offline_cql_cs224r', help='TensorBoard log directory')
+parser.add_argument('--env_version', type=str, default='v4', choices=['v2', 'v4'], help='Environment version to use for evaluation')
+args, _ = parser.parse_known_args()
+
+# Load dataset
+with open(args.dataset, "rb") as f:
     data = pickle.load(f)
 
 states = np.stack([d['state'] for d in data])
@@ -112,15 +119,28 @@ action_dim = 16 * 16
 buffer = ReplayBuffer(states, actions, rewards, next_states, dones, [d['legal_actions'] for d in data], [d['next_legal_actions'] for d in data])
 agent = CQLAgent(state_dim, action_dim)
 
-def evaluate_policy(agent, num_episodes=20):
+# Create TensorBoard writer
+writer = SummaryWriter(log_dir=args.logdir)
+
+def evaluate_policy(agent, num_episodes=20, log_episode:bool=False, save_path:str=None, save_board_every_step:bool=False):
     env = CustomOpponentEnv_V4()
     wins = 0
     losses = 0
     draws = 0
     invalids = 0
-    for _ in range(num_episodes):
+    total_rewards = 0.0
+    total_bad_piece = 0
+    total_threat_created = 0
+    total_threat_blocked = 0
+    total_turns = 0
+
+    # For optional board logging
+    episode_boards = []
+
+    for ep in range(num_episodes):
         obs, _ = env.reset()
         done = False
+        step_counter = 0
         while not done:
             state = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
             legal_actions = [pos * 16 + piece for (pos, piece) in env.legal_actions() if piece is not None]
@@ -130,17 +150,17 @@ def evaluate_policy(agent, num_episodes=20):
             action = (pos, piece)
             obs, reward, done, _, info = env.step(action)
             next_legal_actions = [pos * 16 + piece for (pos, piece) in env.legal_actions() if piece is not None]
-            data = {
-                "state": obs,
-                "action": action,
-                "reward": reward,
-                "next_state": obs,
-                "done": done,
-                "info": info,
-                "legal_actions": legal_actions,
-                "next_legal_actions": next_legal_actions
-            }
-            # ... append data to dataset ...
+            # statistics accumulation
+            total_rewards += reward
+            total_bad_piece += int(info.get('bad_piece', False))
+            total_threat_created += int(info.get('threat_created', False))
+            total_threat_blocked += int(info.get('threat_blocked', False))
+            step_counter += 1
+
+            # Capture board every step for the first episode if requested
+            if log_episode and ep == 0 and save_board_every_step:
+                episode_boards.append(np.copy(env.game.board))
+
         if info.get('win', False):
             wins += 1
         elif info.get('draw', False):
@@ -149,22 +169,31 @@ def evaluate_policy(agent, num_episodes=20):
             invalids += 1
         else:
             losses += 1
+        total_turns += step_counter
+
     total = num_episodes
-    return {
+    stats = {
         "win": wins / total * 100,
         "loss": losses / total * 100,
         "draw": draws / total * 100,
-        "invalid": invalids / total * 100
+        "invalid": invalids / total * 100,
+        "avg_reward": total_rewards / total if total > 0 else 0.0,
+        "avg_bad_piece": total_bad_piece / total,
+        "avg_threats_created": total_threat_created / total,
+        "avg_threats_blocked": total_threat_blocked / total,
+        "avg_turns": total_turns / total if total > 0 else 0.0
     }
+
+    # Save episode boards if requested
+    if log_episode and save_path is not None and episode_boards:
+        with open(save_path, "wb") as f:
+            pickle.dump(episode_boards, f)
+
+    return stats
 
 # training
 batch_size = 64
 num_steps = 100000
-parser = argparse.ArgumentParser()
-parser.add_argument('--logdir', type=str, default='runs/offline_cql_cs224r', help='TensorBoard log directory')
-parser.add_argument('--env_version', type=str, default='v4', choices=['v2', 'v4'], help='Environment version to use for evaluation')
-args = parser.parse_args()
-writer = SummaryWriter(log_dir=args.logdir)
 
 for step in range(num_steps):
     batch = buffer.sample(batch_size)
@@ -176,11 +205,20 @@ for step in range(num_steps):
         agent.update_target()
         print(f"Step {step}, Loss: {loss:.4f}, Bellman: {bellman_loss:.4f}, CQL: {cql_penalty:.4f}")
     if step % 500 == 0:
-        eval_stats = evaluate_policy(agent, num_episodes=100)
+        log_episode = (step % 10000 == 0)
+        board_save_path = None
+        if log_episode:
+            board_save_path = os.path.join(args.logdir, f"episode_boards_step_{step}.pkl")
+        eval_stats = evaluate_policy(agent, num_episodes=100, log_episode=log_episode, save_path=board_save_path, save_board_every_step=True)
         writer.add_scalar('Eval/win_pct', eval_stats["win"], step)
         writer.add_scalar('Eval/loss_pct', eval_stats["loss"], step)
         writer.add_scalar('Eval/draw_pct', eval_stats["draw"], step)
         writer.add_scalar('Eval/invalid_pct', eval_stats["invalid"], step)
+        writer.add_scalar('Eval/avg_reward', eval_stats["avg_reward"], step)
+        writer.add_scalar('Eval/avg_bad_piece', eval_stats["avg_bad_piece"], step)
+        writer.add_scalar('Eval/avg_threats_created', eval_stats["avg_threats_created"], step)
+        writer.add_scalar('Eval/avg_threats_blocked', eval_stats["avg_threats_blocked"], step)
+        writer.add_scalar('Eval/avg_turns', eval_stats["avg_turns"], step)
         print(f"Step {step}, Win: {eval_stats['win']:.2f}%, Loss: {eval_stats['loss']:.2f}%, Draw: {eval_stats['draw']:.2f}%, Invalid: {eval_stats['invalid']:.2f}%")
 
 writer.close()
