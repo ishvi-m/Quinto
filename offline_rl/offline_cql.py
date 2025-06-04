@@ -10,6 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 from commons.quartoenv.env_v2 import RandomOpponentEnv_V2
 from commons.quartoenv.env_v4 import CustomOpponentEnv_V4
 import argparse
+import random
 
 
 class QNetwork(nn.Module):
@@ -201,13 +202,10 @@ def evaluate_policy(agent, num_episodes=20, log_episode:bool=False, save_path:st
     total_threat_created = 0
     total_threat_blocked = 0
     total_turns = 0
-
-    # For optional board logging
     episode_boards = []
 
     for ep in range(num_episodes):
         raw_obs = env.reset()
-        # env.reset may return tuple or obs directly
         if isinstance(raw_obs, tuple):
             obs_vec = flatten_obs(raw_obs[0] if len(raw_obs) == 2 else raw_obs)
         else:
@@ -216,28 +214,33 @@ def evaluate_policy(agent, num_episodes=20, log_episode:bool=False, save_path:st
         step_counter = 0
         while not done:
             state = torch.tensor(obs_vec, dtype=torch.float32).unsqueeze(0)
-            legal_actions = get_legal_actions(env)
-            action_idx = agent.select_action(state, legal_actions=legal_actions)
-            pos = action_idx // 16
-            piece = action_idx % 16
-            action = (pos, piece)
-            step_result = env.step(action)
+            raw_legal_actions = list(env.legal_actions())  # may include piece=None
+            # keep all tuples, convert those with valid piece to flat idx for masking
+            legal_actions = [(int(row), None if piece is None else int(piece)) for (row, piece) in raw_legal_actions]
+            legal_action_indices = [row*16 + piece for (row, piece) in legal_actions if piece is not None]
+            q_values = agent.q_net(state)
+            assert len(legal_actions) > 0, f"ERROR: legal_actions is empty at step {step_counter}! This should never happen."
+            if len(legal_action_indices) == 0:
+                # No actions with concrete piece; fall back to random legal action tuple
+                best_action = random.choice(legal_actions)
+            else:
+                q_legal = q_values[0, legal_action_indices]
+                best_idx = int(torch.argmax(q_legal).item())
+                best_action = legal_actions[best_idx]
+            step_result = env.step(best_action)
+            # Print info after step
             if len(step_result) == 5:
                 raw_obs, reward, done, truncated, info = step_result
             else:
                 raw_obs, reward, done, info = step_result
             obs_vec = flatten_obs(raw_obs)
-            # statistics accumulation
             total_rewards += reward
             total_bad_piece += int(info.get('bad_piece', False))
             total_threat_created += int(info.get('threat_created', False))
             total_threat_blocked += int(info.get('threat_blocked', False))
             step_counter += 1
-
-            # Capture board every step for the first episode if requested
             if log_episode and ep == 0 and save_board_every_step:
                 episode_boards.append(np.copy(env.game.board))
-
         if info.get('win', False):
             wins += 1
         elif info.get('draw', False):
