@@ -138,3 +138,6 @@ wandb/
 
 # tensorboard
 */tensorboard.id/Miniconda3-latest-Linux-x86_64.sh
+
+# Large dataset files
+offline_quinto_dataset.pkl
