@@ -56,16 +56,32 @@ class CQLAgent:
         q_sa = q_values.gather(1, a.unsqueeze(1)).squeeze(1)
         with torch.no_grad():
             next_q_values = self.target_q_net(s_next)
-            max_next_q = torch.stack([
-                next_q_values[i][next_legal_actions_batch[i]].max()
-                for i in range(len(next_legal_actions_batch))
-            ])
+            max_next_q = []
+            for i in range(len(next_legal_actions_batch)):
+                indices = [x for x in next_legal_actions_batch[i] if isinstance(x, int)]
+                if d[i] == 1.0:
+                    max_next_q.append(torch.tensor(0.0, device=next_q_values.device))  # Terminal: no bootstrapping
+                elif len(indices) > 0:
+                    max_next_q.append(next_q_values[i][indices].max())
+                else:
+                    max_next_q.append(torch.tensor(0.0, device=next_q_values.device))  # No legal actions: treat as terminal
+            max_next_q = torch.stack(max_next_q)
             target = r + self.gamma * (1 - d) * max_next_q
         # CQL penalty: use only legal actions for each sample
-        logsumexp_q = torch.stack([
-            torch.logsumexp(q_values[i][legal_actions_batch[i]], dim=0)
-            for i in range(len(legal_actions_batch))
-        ]).mean()
+        logsumexp_values = []
+        for i in range(len(legal_actions_batch)):
+            indices = [x for x in legal_actions_batch[i] if isinstance(x, int)]
+            if len(indices) == 0:
+                continue
+            try:
+                logsumexp_values.append(torch.logsumexp(q_values[i][indices], dim=0))
+            except Exception as e:
+                print(f"Skipping sample {i} due to indexing error: {e} | indices: {legal_actions_batch[i]}")
+                continue
+        if len(logsumexp_values) > 0:
+            logsumexp_q = torch.stack(logsumexp_values).mean()
+        else:
+            logsumexp_q = torch.tensor(0.0, device=q_values.device)
         data_q = q_sa.mean()
         cql_penalty = logsumexp_q - data_q
         bellman_loss = ((q_sa - target) ** 2).mean()
@@ -90,12 +106,18 @@ class CQLAgent:
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='offline_quinto_dataset.pkl', help='Path to offline dataset (.pkl)')
 parser.add_argument('--logdir', type=str, default='runs/offline_cql_cs224r', help='TensorBoard log directory')
-parser.add_argument('--env_version', type=str, default='v4', choices=['v2', 'v4'], help='Environment version to use for evaluation')
+parser.add_argument('--env_version', type=str, default=None, help='Environment version to use for evaluation. If omitted, will use value stored in dataset.')
+parser.add_argument('--normalize_rewards', action='store_true', help='Normalize rewards using mean/std of dataset')
 args, _ = parser.parse_known_args()
 
 # Load dataset
 with open(args.dataset, "rb") as f:
     data = pickle.load(f)
+
+# Determine env version from dataset if not explicitly provided
+if args.env_version is None:
+    dataset_env_version = data[0].get('env_version', 'v4')
+    args.env_version = dataset_env_version
 
 states = np.stack([d['state'] for d in data])
 actions = np.stack([d['action'] for d in data])
@@ -109,7 +131,20 @@ actions = np.array([a[0] * 16 + a[1] for a in actions])
 # convert to torch tensors
 states = torch.tensor(states, dtype=torch.float32)
 actions = torch.tensor(actions, dtype=torch.long)
-rewards = torch.tensor(rewards, dtype=torch.float32)
+
+# Optionally normalize rewards to have zero mean and unit std (helps across env versions with different scales)
+if args.normalize_rewards:
+    mean_r = rewards.mean()
+    std_r = rewards.std()
+    if std_r > 1e-8:
+        rewards = (rewards - mean_r) / std_r
+    else:
+        rewards = rewards * 0.0  # all same
+    rewards = torch.tensor(rewards, dtype=torch.float32)
+else:
+    rewards = torch.tensor(rewards, dtype=torch.float32)
+
+# Ensure next_states and dones tensors created after potential reward normalization logic
 next_states = torch.tensor(next_states, dtype=torch.float32)
 dones = torch.tensor(dones, dtype=torch.float32)
 
@@ -122,8 +157,41 @@ agent = CQLAgent(state_dim, action_dim)
 # Create TensorBoard writer
 writer = SummaryWriter(log_dir=args.logdir)
 
+# ---------------------------------------------------------------------------
+# Helper utilities for evaluation (env construction, obs flattening, legal actions)
+# ---------------------------------------------------------------------------
+
+def make_eval_env(version: str):
+    if version == 'v2':
+        return RandomOpponentEnv_V2()
+    elif version == 'v4':
+        return CustomOpponentEnv_V4()
+    else:
+        raise ValueError(f"Unknown env_version '{version}' for evaluation.")
+
+
+def flatten_obs(obs):
+    """Convert (board, piece) or already-flat obs into 1-D float32 numpy array."""
+    if isinstance(obs, tuple):
+        board, piece = obs
+        board_flat = board.flatten().astype(np.float32)
+        if piece is None:
+            piece_val = -1.0
+        elif hasattr(piece, 'index'):
+            piece_val = float(piece.index)
+        else:
+            piece_val = float(piece)
+        return np.concatenate([board_flat, np.array([piece_val], dtype=np.float32)])
+    else:
+        return np.array(obs, dtype=np.float32)
+
+
+def get_legal_actions(env):
+    """Return list of integer-encoded legal actions for the current env state."""
+    return list(env.legal_actions())
+
 def evaluate_policy(agent, num_episodes=20, log_episode:bool=False, save_path:str=None, save_board_every_step:bool=False):
-    env = CustomOpponentEnv_V4()
+    env = make_eval_env(args.env_version)
     wins = 0
     losses = 0
     draws = 0
@@ -138,18 +206,27 @@ def evaluate_policy(agent, num_episodes=20, log_episode:bool=False, save_path:st
     episode_boards = []
 
     for ep in range(num_episodes):
-        obs, _ = env.reset()
+        raw_obs = env.reset()
+        # env.reset may return tuple or obs directly
+        if isinstance(raw_obs, tuple):
+            obs_vec = flatten_obs(raw_obs[0] if len(raw_obs) == 2 else raw_obs)
+        else:
+            obs_vec = flatten_obs(raw_obs)
         done = False
         step_counter = 0
         while not done:
-            state = torch.tensor(obs, dtype=torch.float32).unsqueeze(0)
-            legal_actions = [pos * 16 + piece for (pos, piece) in env.legal_actions() if piece is not None]
+            state = torch.tensor(obs_vec, dtype=torch.float32).unsqueeze(0)
+            legal_actions = get_legal_actions(env)
             action_idx = agent.select_action(state, legal_actions=legal_actions)
             pos = action_idx // 16
             piece = action_idx % 16
             action = (pos, piece)
-            obs, reward, done, _, info = env.step(action)
-            next_legal_actions = [pos * 16 + piece for (pos, piece) in env.legal_actions() if piece is not None]
+            step_result = env.step(action)
+            if len(step_result) == 5:
+                raw_obs, reward, done, truncated, info = step_result
+            else:
+                raw_obs, reward, done, info = step_result
+            obs_vec = flatten_obs(raw_obs)
             # statistics accumulation
             total_rewards += reward
             total_bad_piece += int(info.get('bad_piece', False))
