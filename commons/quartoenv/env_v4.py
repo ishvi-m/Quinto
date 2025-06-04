@@ -10,7 +10,9 @@ from ..policies import mask_function
 import torch
 from .encoder import MoveEncoder
 from sb3_contrib import MaskablePPO
+from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
 import wandb
+from gymnasium.spaces import MultiDiscrete
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +111,7 @@ class CustomOpponentEnv_V4(QuartoBase):
             (int, int): Tuple encoding position and piece in their integer version.
         """
         # freecells are cells with no piece inside
-        freecells = np.argwhere(self.symmetric_board == -1)
+        freecells = np.argwhere(self.game.board == -1)
         # available pieces are those that have not been put on the board
         available_pieces = list(
             map(lambda el: QUARTO_DICT[el], self.available_pieces())) \
@@ -157,13 +159,17 @@ class CustomOpponentEnv_V4(QuartoBase):
             info["bad_piece"] = True
 
         if not self.done:
-            # opponent's reply
-            opponent_action, _ = self._opponent.predict(
-                observation=self._observation, 
-                action_masks = mask_function(self)
+            if self._opponent is not None:
+                opponent_action, _ = self._opponent.predict(
+                    observation=self._observation, 
+                    action_masks = mask_function(self)
                 )
-            # mapping opponent moves to the usual (tuple, int) representation
-            opponent_pos, opponent_piece = self.move_encoder.decode(action=opponent_action)
+                opponent_pos, opponent_piece = self.move_encoder.decode(action=opponent_action)
+            else:
+                # Use a random legal action if no opponent is set
+                opponent_pos, opponent_piece = self.move_encoder.decode(
+                    random.choice(list(self.legal_actions()))
+                )
             super().step((opponent_pos, opponent_piece))
             
             if self.done: 
