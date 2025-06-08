@@ -106,10 +106,11 @@ class CustomOpponentEnv_V4(QuartoBase):
 
     def legal_actions(self): 
         """This function returns all the legal actions given the present state encoded as int-int tuples.
-        
-        Yields: 
-            (int, int): Tuple encoding position and piece in their integer version.
+        Yields: (int, int): Tuple encoding position and piece in their integer version.
         """
+        # If the game is over, there are no legal actions
+        if self.done:
+            return
         # freecells are cells with no piece inside
         freecells = np.argwhere(self.game.board == -1)
         # available pieces are those that have not been put on the board
@@ -117,7 +118,6 @@ class CustomOpponentEnv_V4(QuartoBase):
             map(lambda el: QUARTO_DICT[el], self.available_pieces())) \
                 if len(self.available_pieces()) > 0 \
                 else [None]
-        
         # a legal action is of the kind ((x,y), QuartoPiece)
         for legal_action in product(freecells, available_pieces): 
             yield self.move_encoder.encode(legal_action)

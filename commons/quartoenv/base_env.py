@@ -89,6 +89,9 @@ class QuartoBase(gym.Env):
         # Process the next piece
         self.piece = next
         
+        # After processing, if the board is full or win/draw, set self.broken = True to ensure done is True
+        if self.game.game_over or self.game.draw or (-1 not in self.game.board):
+            self.broken = True
         return self._observation, reward, self.done, False, info  # Added truncated=False for Gymnasium compatibility
 
     def render(self, mode:str="human", **kwargs):

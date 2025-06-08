@@ -10,7 +10,6 @@ from torch.utils.tensorboard import SummaryWriter
 from commons.quartoenv.env_v2 import RandomOpponentEnv_V2
 from commons.quartoenv.env_v4 import CustomOpponentEnv_V4
 import argparse
-import random
 
 
 class QNetwork(nn.Module):
@@ -101,8 +100,10 @@ class CQLAgent:
                 mask = torch.zeros_like(q_values)
                 mask[0, legal_actions] = 1
                 q_values = q_values * mask + (1 - mask) * -1e9  # Large negative for illegal
-            action_idx = q_values.argmax().item()
-        return action_idx
+            q_legal = q_values[0, legal_actions]
+            best_idx = int(torch.argmax(q_legal).item())
+            best_action = legal_actions[best_idx]
+        return best_action
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='offline_quinto_dataset.pkl', help='Path to offline dataset (.pkl)')
@@ -214,14 +215,15 @@ def evaluate_policy(agent, num_episodes=20, log_episode:bool=False, save_path:st
         step_counter = 0
         while not done:
             state = torch.tensor(obs_vec, dtype=torch.float32).unsqueeze(0)
-            raw_legal_actions = list(env.legal_actions())  # may include piece=None
-            # keep all tuples, convert those with valid piece to flat idx for masking
-            legal_actions = [(int(row), None if piece is None else int(piece)) for (row, piece) in raw_legal_actions]
-            legal_action_indices = [row*16 + piece for (row, piece) in legal_actions if piece is not None]
+            legal_actions = [(int(row), int(piece)) for (row, piece) in env.legal_actions() if piece is not None]
+            legal_action_indices = [row*16 + piece for (row, piece) in legal_actions]
             q_values = agent.q_net(state)
-            assert len(legal_actions) > 0, f"ERROR: legal_actions is empty at step {step_counter}! This should never happen."
-            if len(legal_action_indices) == 0:
-                # No actions with concrete piece; fall back to random legal action tuple
+            if len(legal_actions) == 0:
+                # If no legal actions but not done, forcibly end episode (silent)
+                done = True
+                break
+            elif len(legal_action_indices) == 0:
+                import random
                 best_action = random.choice(legal_actions)
             else:
                 q_legal = q_values[0, legal_action_indices]
@@ -241,6 +243,9 @@ def evaluate_policy(agent, num_episodes=20, log_episode:bool=False, save_path:st
             step_counter += 1
             if log_episode and ep == 0 and save_board_every_step:
                 episode_boards.append(np.copy(env.game.board))
+            # If done after step, break immediately
+            if done:
+                break
         if info.get('win', False):
             wins += 1
         elif info.get('draw', False):

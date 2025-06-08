@@ -65,10 +65,11 @@ class RandomOpponentEnv(QuartoBase):
 
     def legal_actions(self): 
         """This function returns all the legal actions given the present state encoded as int-int tuples.
-        
-        Yields: 
-            (int, int): Tuple encoding position and piece in their integer version.
+        Yields: (int, int): Tuple encoding position and piece in their integer version.
         """
+        # If the game is over, there are no legal actions
+        if self.done:
+            return
         # freecells are cells with no piece inside
         freecells = self.game.free_spots
         # available pieces are those that have not been put on the board
@@ -76,7 +77,6 @@ class RandomOpponentEnv(QuartoBase):
             map(lambda el: QUARTO_DICT[el], self.available_pieces())) \
                 if len(self.available_pieces()) > 0 \
                 else [None]
-        
         # a legal action is of the kind ((x,y), QuartoPiece)
         for legal_action in product(freecells, available_pieces): 
             yield self.move_encoder.encode(legal_action)
@@ -106,6 +106,20 @@ class RandomOpponentEnv(QuartoBase):
         
         # agent_ply
         _, reward, _, truncated, info = super().step((position, next))
+        info["player"] = "agent"  # Mark this as agent's move
+
+        # Check for threat creation
+        if self.game.threatCreated(position):
+            info["threat_created"] = True
+
+        # Check for threat blocking
+        if self.game.threatBlocked(position):
+            info["threat_blocked"] = True
+
+        # Check for bad piece (piece that allows opponent to win)
+        if self.game.badPieceGiven(next):
+            info["bad_piece"] = True
+
         if not self.done:
             # opponent's reply
             random_move = self.move_encoder.decode(random.choice(list(self.legal_actions())))
@@ -114,5 +128,6 @@ class RandomOpponentEnv(QuartoBase):
             
             if self.done: 
                 info["loss"] = True
+                info["win"] = False  # Ensure win is False if we lost
 
         return self._observation, reward, self.done, truncated, info
