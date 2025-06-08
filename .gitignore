@@ -141,3 +141,5 @@ wandb/
 
 # Large dataset files
 offline_quinto_dataset.pkl
+offline_dataset_v4.pkl
+offline_dataset_v4_big.pkl
