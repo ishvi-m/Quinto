@@ -82,6 +82,7 @@ class QuartoBase(gym.Env):
             # check draw
             elif self.game.draw:
                 info['draw'] = True
+                info['win'] = False
             else:
                 # a valid move was played
                 pass

@@ -17,15 +17,13 @@ import wandb
 
 logger = logging.getLogger(__name__)
 
-class CustomOpponentEnv_V4(QuartoBase):
+class CustomOpponentEnv_V5(QuartoBase):
     """
     Environment version 4 that implements comprehensive reward functions:
-    - Threat Creation: +1 for creating a line of 3 with shared attribute
-    - Threat Blocking: +0.5 for blocking opponent's potential win
-    - Bad Piece Penalty: -0.5 for giving opponent a winning piece
-    - Center Preference: +0.1 for central positions
-    - Faster win bonus: +10/num_turns
-    - Prolonged loss penalty: -1 * num_turns if losing
+    - Threat Creation: +6 for creating a line of 3 with shared attribute
+    - Threat Blocking: +7 for blocking opponent's potential win
+    - Bad Piece Penalty: -10 for giving opponent a winning piece
+    - Prolonged loss penalty: -0.5 * num_turns if losing
     - Win reward: +10
     - Loss penalty: -10
     - Draw: 0
@@ -39,22 +37,22 @@ class CustomOpponentEnv_V4(QuartoBase):
         self.action_space = MultiDiscrete([16, 16])  # [position, piece]
         self.move_encoder = MoveEncoder()
         # self.inverse_symmetries = None  # Will be set by the training script
-        self._opponent = None  # Will be set by the training script
+        # self._opponent = None  # Will be set by the training script
         # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print("initialized CustomOpponentEnv_V4")
+        print("initialized CustomOpponentEnv_V5")
 
-    @property
-    def opponent(self):
-        """Getter method to retrieve opponent"""
-        return self._opponent
+    # @property
+    # def opponent(self):
+    #     """Getter method to retrieve opponent"""
+    #     return self._opponent
     
-    def update_opponent(self, new_opponent:OnPolicyAlgorithm):
-        """Setter method for opponent. Implemented to perform self-play with increasingly better agents."""
-        if isinstance(new_opponent, OnPolicyAlgorithm):
-            del self._opponent
-            self._opponent = new_opponent
-        else:
-            raise ValueError(f"New opponent: {new_opponent} is not an OnPolicyAlgorithm instance!")
+    # def update_opponent(self, new_opponent:OnPolicyAlgorithm):
+    #     """Setter method for opponent. Implemented to perform self-play with increasingly better agents."""
+    #     if isinstance(new_opponent, OnPolicyAlgorithm):
+    #         del self._opponent
+    #         self._opponent = new_opponent
+    #     else:
+    #         raise ValueError(f"New opponent: {new_opponent} is not an OnPolicyAlgorithm instance!")
 
     @property
     def _observation(self):
@@ -75,19 +73,19 @@ class CustomOpponentEnv_V4(QuartoBase):
             reward += 10  # Win reward
             #reward += 0.5 / info["turn"]  # Faster win bonus
         elif info["draw"]:
-            reward = 0  # Draw reward
-            #reward = 2
+            #reward = 0  # Draw reward
+            reward = 2
         elif info.get("loss", None):
             reward = -10  # Loss penalty
             reward -= 0.5 * info["turn"]  # Prolonged loss penalty
 
         # Intermediate rewards
         if info.get("threat_created", False):
-            reward += 2  # Threat creation reward
-            #reward += 6  # Threat creation reward
+            #reward += 2  # Threat creation reward
+            reward += 6  # Threat creation reward
         if info.get("threat_blocked", False):
-            reward += 2  # Threat blocking reward
-            #reward += 7  # Threat creation reward
+            #reward += 2  # Threat blocking reward
+            reward += 7  # Threat creation reward
         if info.get("bad_piece", False):
             reward -= 10  # Bad piece penalty
 
@@ -170,18 +168,21 @@ class CustomOpponentEnv_V4(QuartoBase):
 
         if not self.done:
             # opponent's reply
-            opponent_action, _ = self._opponent.predict(
-                observation=self._observation, 
-                action_masks = mask_function(self)
-                )
-            opponent_pos, opponent_piece = self.move_encoder.decode(action=opponent_action)
+            # opponent_action, _ = self._opponent.predict(
+            #     observation=self._observation, 
+            #     action_masks = mask_function(self)
+            #     )
+            # opponent_action, _ = self._opponent.predict(
+            #     observation=self._observation
+            #     )
+            # mapping opponent moves to the usual (tuple, int) representation
+            # opponent_pos, opponent_piece = self.move_encoder.decode(action=opponent_action)
             # Get info from opponent's move
-            super().step((opponent_pos, opponent_piece))
+            # super().step((opponent_pos, opponent_piece))
 
-            # for random opponent, uncomment the following lines
-            # random_move = self.move_encoder.decode(random.choice(list(self.legal_actions())))
-            # # stepping env with random player move - not interested in opponent's perspective
-            # super().step(random_move)
+            random_move = self.move_encoder.decode(random.choice(list(self.legal_actions())))
+            # stepping env with random player move - not interested in opponent's perspective
+            super().step(random_move)
             
             # Then check if we lost
             if self.done: 
@@ -190,3 +191,6 @@ class CustomOpponentEnv_V4(QuartoBase):
         
         reward = self.reward_function(info=info)
         return self._observation, reward, self.done, truncated, info
+        
+
+        

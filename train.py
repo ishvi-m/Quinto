@@ -1,8 +1,9 @@
-from commons.policies import reverseAlgoDict, AlgoDict, mask_function, ActionMasker
-from commons.quartoenv import RandomOpponentEnv, RandomOpponentEnv_V1, RandomOpponentEnv_V2, CustomOpponentEnv_V3, CustomOpponentEnv_V4
+]from commons.policies import reverseAlgoDict, AlgoDict, mask_function, ActionMasker
+from commons.quartoenv import RandomOpponentEnv, RandomOpponentEnv_V1, RandomOpponentEnv_V2, CustomOpponentEnv_V3, CustomOpponentEnv_V4, CustomOpponentEnv_V5
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 from sb3_contrib.ppo_mask import MaskablePPO
 from stable_baselines3.common.callbacks import CheckpointCallback, EveryNTimesteps
+from stable_baselines3 import PPO, A2C
 from commons.utils import WinPercentageCallback, UpdateOpponentCallback
 from itertools import compress
 import numpy as np
@@ -78,22 +79,22 @@ use_dense_rewards=args.use_dense_rewards
 
 if args.default: 
     algorithm = "maskedPPO"
-    verbose=2
+    verbose=1
     train_timesteps=1_000_000
     evaluate_while_training=True
     store_checkpoints=True
     evaluation_frequency=1000
-    test_episodes=100
+    test_episodes=1000
     action_masking=True
     losing_penalty=True
-    duration_penalty=True
+    duration_penalty=False
     show_progressbar=True
     save_model=True
     use_symmetries=False
     self_play=False
-    model_path=None
+    model_path=None # add path for trained opponent
     logwandb = True
-    use_dense_rewards = True
+    use_dense_rewards = False
 
 def main(): 
     # no seed is setted, but it can be easily done uncommenting the following lines
@@ -114,22 +115,29 @@ def main():
     if losing_penalty:
         env = RandomOpponentEnv_V1()
         version = "v1"
+        if model_path:
+                        #opponent = PPO.load(model_path, env=env, custom_objects={'learning_rate': 0.0, "clip_range": 0.0, "lr_schedule":0.0})
+                        opponent = MaskablePPO.load(model_path, env=env, custom_objects={'learning_rate': 0.0, "clip_range": 0.0, "lr_schedule":0.0})
+                        opponent.set_env(env=env)
+                        env.update_opponent(new_opponent=opponent)
         if duration_penalty: 
             env = RandomOpponentEnv_V2()
             version = "v2"
             if use_symmetries:
-                env = CustomOpponentEnv_V3()
-                version = "v3"
-                # creating an opponent from the one given in model path - opponent does always play legit moves
-                opponent = MaskablePPO.load(model_path, env=env, custom_objects={'learning_rate': 0.0, "clip_range": 0.0, "lr_schedule":0.0})
-                opponent.set_env(env=env)
-                # using this opponent to perform adversarial learning
-                env.update_opponent(new_opponent=opponent)
+                # env = CustomOpponentEnv_V3()
+                # version = "v3"
+                # # creating an opponent from the one given in model path - opponent does always play legit moves
+                # opponent = MaskablePPO.load(model_path, env=env, custom_objects={'learning_rate': 0.0, "clip_range": 0.0, "lr_schedule":0.0})
+                # opponent.set_env(env=env)
+                # # using this opponent to perform adversarial learning
+                # env.update_opponent(new_opponent=opponent)
                 if use_dense_rewards:
                     env = CustomOpponentEnv_V4()
                     version = "v4"
-                    # Set up opponent for V4 environment
+                    # Set up opponent for V4 environment, similar for v5
+                    # comment this out for random opponent
                     if model_path:
+                        #opponent = PPO.load(model_path, env=env, custom_objects={'learning_rate': 0.0, "clip_range": 0.0, "lr_schedule":0.0})
                         opponent = MaskablePPO.load(model_path, env=env, custom_objects={'learning_rate': 0.0, "clip_range": 0.0, "lr_schedule":0.0})
                         opponent.set_env(env=env)
                         env.update_opponent(new_opponent=opponent)
@@ -146,24 +154,7 @@ def main():
             env=env, 
             verbose=verbose,
             seed=seed,
-            tensorboard_log=f"logs/tensorboard.id",
-            device=device,
-            # Optimize for GPU
-            n_steps=2048,  # Increased batch size for GPU
-            batch_size=64,  # Increased batch size for GPU
-            n_epochs=10,    # Increased epochs for GPU
-            learning_rate=3e-4,
-            ent_coef=0.01,
-            vf_coef=0.5,
-            max_grad_norm=0.5,
-            gae_lambda=0.95,
-            clip_range=0.2,
-            clip_range_vf=None,
-            normalize_advantage=True,
-            target_kl=None,
-            create_eval_env=False,
-            policy_kwargs=None,
-            _init_setup_model=True
+            tensorboard_log=f"logs/tensorboard.id"
         )
     else: 
         model_function = reverseAlgoDict[algorithm.upper()]
