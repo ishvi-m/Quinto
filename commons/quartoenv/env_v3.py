@@ -9,6 +9,7 @@ from stable_baselines3.common.on_policy_algorithm import OnPolicyAlgorithm
 from commons.policies.onpolicy_wrapper import mask_function
 from .game import QUARTO_DICT
 from itertools import product
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -153,21 +154,35 @@ class CustomOpponentEnv_V3(QuartoBase):
         _, _, _, truncated, info = super().step((position, next))
 
         if not self.done:
-            # opponent's reply
-            opponent_action, _ = self._opponent.predict(
-                observation=self._observation, 
-                action_masks = mask_function(self)
+            if self._opponent is not None:
+                # opponent's reply (agent)
+                opponent_action, _ = self._opponent.predict(
+                    observation=self._observation, 
+                    action_masks = mask_function(self)
                 )
-            # mapping opponent moves to the usual (tuple, int) representation
-            opponent_pos, opponent_piece = self.move_encoder.decode(action=opponent_action)
-            # opponent choses played position in a symmetric space too so move shall be decoded
-            for inverse_symmetry in self.inverse_symmetries: 
-                opponent_pos = inverse_symmetry(*opponent_pos)
-            # stepping env with opponent player move - not interested in opponent's perspective
+                opponent_pos, opponent_piece = self.move_encoder.decode(action=opponent_action)
+                for inverse_symmetry in self.inverse_symmetries: 
+                    opponent_pos = inverse_symmetry(*opponent_pos)
+            else:
+                # fallback: random opponent
+                opponent_pos, opponent_piece = self.move_encoder.decode(
+                    random.choice(list(self.legal_actions()))
+                )
+                for inverse_symmetry in self.inverse_symmetries: 
+                    opponent_pos = inverse_symmetry(*opponent_pos)
             super().step((opponent_pos, opponent_piece))
             
             if self.done: 
                 info["loss"] = True
         
+        if self.game.threatBlocked(position):
+            info["threat_blocked"] = True
+        if self.game.badPieceGiven(next):
+            info["bad_piece"] = True
+        
         reward = self.reward_function(info=info)
+        # Ensure all info keys are present for logging consistency
+        for key in ['threat_blocked', 'bad_piece', 'loss']:
+            if key not in info:
+                info[key] = False
         return self._observation, reward, self.done, truncated, info

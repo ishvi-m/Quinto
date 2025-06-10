@@ -10,6 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 from commons.quartoenv.env_v2 import RandomOpponentEnv_V2
 from commons.quartoenv.env_v4 import CustomOpponentEnv_V4
 import argparse
+from sb3_contrib.ppo_mask import MaskablePPO
 
 
 class QNetwork(nn.Module):
@@ -109,7 +110,10 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--dataset', type=str, default='offline_quinto_dataset.pkl', help='Path to offline dataset (.pkl)')
 parser.add_argument('--logdir', type=str, default='runs/offline_cql_cs224r', help='TensorBoard log directory')
 parser.add_argument('--env_version', type=str, default=None, help='Environment version to use for evaluation. If omitted, will use value stored in dataset.')
-parser.add_argument('--normalize_rewards', action='store_true', help='Normalize rewards using mean/std of dataset')
+parser.add_argument('--normalize_rewards', action='store_true', help='Normalize rewards using mean/std of dataset (applied at training time, not in dataset)')
+parser.add_argument('--opponent_model_path', type=str, default=None, help='Path to MaskedPPO opponent model for evaluation (optional)')
+parser.add_argument('--alpha', type=float, default=1.0, help='CQL penalty weight (alpha)')
+parser.add_argument('--num_steps', type=int, default=100000, help='Number of training steps')
 args, _ = parser.parse_known_args()
 
 # Load dataset
@@ -154,7 +158,7 @@ state_dim = states.shape[1]
 action_dim = 16 * 16
 
 buffer = ReplayBuffer(states, actions, rewards, next_states, dones, [d['legal_actions'] for d in data], [d['next_legal_actions'] for d in data])
-agent = CQLAgent(state_dim, action_dim)
+agent = CQLAgent(state_dim, action_dim, alpha=args.alpha)
 
 # Create TensorBoard writer
 writer = SummaryWriter(log_dir=args.logdir)
@@ -163,13 +167,24 @@ writer = SummaryWriter(log_dir=args.logdir)
 # Helper utilities for evaluation (env construction, obs flattening, legal actions)
 # ---------------------------------------------------------------------------
 
-def make_eval_env(version: str):
-    if version == 'v2':
-        return RandomOpponentEnv_V2()
+def make_eval_env(version: str, opponent_model_path=None):
+    if version == 'v0':
+        from commons.quartoenv.env_v3 import CustomOpponentEnv_V3
+        env = CustomOpponentEnv_V3()
+    elif version == 'v2':
+        from commons.quartoenv.env_v2 import RandomOpponentEnv_V2
+        env = RandomOpponentEnv_V2()
     elif version == 'v4':
-        return CustomOpponentEnv_V4()
+        from commons.quartoenv.env_v4 import CustomOpponentEnv_V4
+        env = CustomOpponentEnv_V4()
     else:
         raise ValueError(f"Unknown env_version '{version}' for evaluation.")
+
+    # If an opponent model path is provided, load and set the opponent
+    if opponent_model_path is not None:
+        opponent = MaskablePPO.load(opponent_model_path, env=env, custom_objects={'learning_rate': 0.0, "clip_range": 0.0})
+        env.update_opponent(new_opponent=opponent)
+    return env
 
 
 def flatten_obs(obs):
@@ -193,7 +208,7 @@ def get_legal_actions(env):
     return list(env.legal_actions())
 
 def evaluate_policy(agent, num_episodes=20, log_episode:bool=False, save_path:str=None, save_board_every_step:bool=False):
-    env = make_eval_env(args.env_version)
+    env = make_eval_env(args.env_version, args.opponent_model_path)
     wins = 0
     losses = 0
     draws = 0
@@ -278,9 +293,8 @@ def evaluate_policy(agent, num_episodes=20, log_episode:bool=False, save_path:st
 
 # training
 batch_size = 64
-num_steps = 100000
 
-for step in range(num_steps):
+for step in range(args.num_steps):
     batch = buffer.sample(batch_size)
     loss, bellman_loss, cql_penalty = agent.update(batch[:5], batch[5], batch[6])
     writer.add_scalar('Loss/total', loss, step)

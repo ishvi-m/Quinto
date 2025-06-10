@@ -16,12 +16,13 @@ from sb3_contrib.common.wrappers import ActionMasker
 # Import environments lazily to avoid circular deps
 from commons.quartoenv.env import RandomOpponentEnv  # v0
 from commons.quartoenv.env_v4 import CustomOpponentEnv_V4  # v4
+from commons.quartoenv.env_v3 import CustomOpponentEnv_V3
 
 
 def make_env(version: str):
     """Return an environment instance according to the requested version."""
     if version == "v0":
-        env = RandomOpponentEnv()
+        env = CustomOpponentEnv_V3()
     elif version == "v4":
         env = CustomOpponentEnv_V4()
     else:
@@ -49,8 +50,13 @@ def main():
         """Return the innermost env (unwrap helpers / mask wrappers)."""
         return e.env if hasattr(e, "env") else e
 
-    # Load the pretrained MaskedPPO agent
+    # Load the pretrained MaskedPPO agent for the main player
     model = MaskablePPO.load(args.model_path, env=env, custom_objects={"learning_rate": 0.0, "clip_range": 0.0})
+
+    # Load the opponent agent (use the same or a different checkpoint as desired)
+    opponent_model_path = "commons/trainedmodels/MASKEDPPOv3_120e6.zip"  # <-- set your v3 model path here
+    opponent = MaskablePPO.load(opponent_model_path, env=env, custom_objects={"learning_rate": 0.0, "clip_range": 0.0})
+    _base_env(env).update_opponent(new_opponent=opponent)
 
     dataset = []
 
@@ -70,18 +76,18 @@ def main():
             next_obs, reward, done, truncated, info = env.step(action)
             next_legal_actions = [pos * 16 + piece for (pos, piece) in _base_env(env).legal_actions() if piece is not None]
 
-            dataset.append(
-                {
-                    "state": obs,
-                    "action": action,
-                    "reward": reward,
-                    "next_state": next_obs,
-                    "done": done,
-                    "info": info,
-                    "legal_actions": legal_actions,
-                    "next_legal_actions": next_legal_actions,
-                }
-            )
+            transition = {
+                "state": obs,
+                "action": action,
+                "reward": reward,
+                "next_state": next_obs,
+                "done": done,
+                "info": info,
+                "legal_actions": legal_actions,
+                "next_legal_actions": next_legal_actions,
+                "env_version": args.env_version
+            }
+            dataset.append(transition)
             obs = next_obs
 
         if (ep + 1) % 100 == 0:
